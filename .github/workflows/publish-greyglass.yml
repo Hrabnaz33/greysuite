@@ -1,0 +1,183 @@
+name: Publish GreyGlass
+
+on:
+  push:
+    tags:
+      - 'v*'             # z. B. v1.0.1.0
+  release:
+    types: [published]   # wenn Release manuell erstellt wird
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (z. B. 1.0.1.0)'
+        required: true
+
+permissions:
+  contents: write         # push & release (GITHUB_TOKEN)
+  actions: read
+
+env:
+  DOWNLOAD_BASE_URL: https://downloads.hrabnaz.dev
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bestimme Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $v = "${{ inputs.version }}"
+          } elseif ("${{ github.event_name }}" -eq "push" -and "${{ github.ref }}".StartsWith("refs/tags/")) {
+            $t = "${{ github.ref }}".Replace("refs/tags/", "")
+            $v = $t.TrimStart("v")
+          } elseif ("${{ github.event_name }}" -eq "release") {
+            $t = "${{ github.event.release.tag_name }}"
+            $v = $t.TrimStart("v")
+          } else { throw "Keine Version gefunden." }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Suche MSIX in Repo
+        id: find_msix
+        shell: pwsh
+        run: |
+          $v='${{ steps.ver.outputs.version }}'
+          $file = Get-ChildItem -Path . -Filter "GreyGlass_${v}_*.msix" -File -ErrorAction SilentlyContinue
+          if ($file) {
+            echo "msix=$($file.Name)" >> $env:GITHUB_OUTPUT
+            echo "found=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "found=false" >> $env:GITHUB_OUTPUT
+
+      - name: Falls nötig: MSIX aus Release-Assets herunterladen
+        if: steps.find_msix.outputs.found != 'true' && github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $v='${{ steps.ver.outputs.version }}'
+          $repo='${{ github.repository }}'
+          $release = Invoke-RestMethod -Headers @{Authorization="Bearer $env:GH_TOKEN"; "X-GitHub-Api-Version"="2022-11-28"} `
+            -Uri "https://api.github.com/repos/$repo/releases/tags/v$v"
+          $asset = $release.assets | Where-Object { $_.name -match '\.msix$' } | Select-Object -First 1
+          if (-not $asset) { throw "Kein .msix Asset im Release gefunden." }
+          $target = "GreyGlass_${v}_x64.msix"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $target
+          Write-Host "Heruntergeladen: $target"
+
+      - name: AppInstaller & index.html aktualisieren
+        shell: pwsh
+        run: |
+          $v='${{ steps.ver.outputs.version }}'
+          $msix = Get-ChildItem -Path . -Filter "GreyGlass_${v}_*.msix" -File | Select-Object -First 1
+          if (-not $msix) { throw "MSIX für Version $v nicht gefunden." }
+
+          $appInstallerPath = "deploy/appinstaller/GreyGlass.appinstaller"
+          if (-not (Test-Path $appInstallerPath)) { throw "AppInstaller nicht gefunden: $appInstallerPath" }
+
+          [xml]$xml = Get-Content -Raw $appInstallerPath
+          $xml.AppInstaller.Version = $v
+          $mp = $xml.AppInstaller.MainPackage
+          $mp.Version = $v
+          $mp.Uri = "${{ env.DOWNLOAD_BASE_URL }}/$($msix.Name)"
+          $xml.Save($appInstallerPath)
+          Write-Host "AppInstaller aktualisiert -> Version=$v; Uri=$($mp.Uri)"
+
+          $indexPath = "index.html"
+          $index = Get-Content -Raw $indexPath
+          $index = [regex]::Replace($index, 'GreyGlass_[0-9A-Za-z\._-]+\.msix', [System.Text.RegularExpressions.Regex]::Escape($msix.Name))
+          Set-Content -NoNewline -Path $indexPath -Value $index
+          Write-Host "index.html aktualisiert -> $($msix.Name)"
+
+      # --- NEU: Zertifikat aus PFX-Secrets exportieren & bereitstellen ---
+      - name: Prüfe PFX-Secrets
+        id: pfx
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.CODESIGN_PFX_BASE64 }}" ] && [ -n "${{ secrets.CODESIGN_PFX_PASSWORD }}" ]; then
+            echo "has_pfx=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_pfx=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: PFX → CER erzeugen
+        if: steps.pfx.outputs.has_pfx == 'true'
+        shell: pwsh
+        run: |
+          # PFX aus Secret herstellen
+          [IO.File]::WriteAllBytes("codesign.pfx",[Convert]::FromBase64String("${{ secrets.CODESIGN_PFX_BASE64 }}"))
+          $pwd = ConvertTo-SecureString "${{ secrets.CODESIGN_PFX_PASSWORD }}" -AsPlainText -Force
+
+          # Import ins CurrentUser\My (Exportable optional)
+          $import = Import-PfxCertificate -FilePath .\codesign.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pwd -Exportable
+          $cert = if ($import -is [array]) { $import[0].Certificate } else { $import.Certificate }
+
+          # Nur öffentlicher Teil (ohne Private Key) als .cer exportieren
+          Export-Certificate -Cert $cert -FilePath Hrabnaz_CodeSigning.cer | Out-Null
+          Write-Host "CER erzeugt: Hrabnaz_CodeSigning.cer"
+        # Import-PfxCertificate / Export-Certificate Doku:
+        # - Import-PfxCertificate importiert PFX in einen Zertifikat-Speicher
+        # - Export-Certificate exportiert nur das Zertifikat (ohne priv. Schlüssel)
+        # Referenzen: Microsoft Learn
+        # (werden unten in der Antwort zitiert)
+
+      - name: Commit & Push (AppInstaller + index + MSIX + CER)
+        shell: pwsh
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html deploy/appinstaller/GreyGlass.appinstaller
+          $v='${{ steps.ver.outputs.version }}'
+          $msix = Get-ChildItem -Path . -Filter "GreyGlass_${v}_*.msix" -File | Select-Object -First 1
+          if ($msix) { git add $msix.Name }
+          if (Test-Path .\Hrabnaz_CodeSigning.cer) { git add Hrabnaz_CodeSigning.cer }
+          if ((git diff --cached --name-only).Length -gt 0) {
+            git commit -m "chore(release): GreyGlass $v (update appinstaller/index; add msix/cer)"
+            git push
+          } else {
+            Write-Host "Keine Änderungen zum Commit."
+          }
+
+      - name: Release erstellen/aktualisieren & MSIX anhängen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: GreyGlass ${{ steps.ver.outputs.version }}
+          files: |
+            GreyGlass_${{ steps.ver.outputs.version }}_*.msix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: CER als Release-Asset anhängen (falls vorhanden)
+        if: steps.pfx.outputs.has_pfx == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          files: Hrabnaz_CodeSigning.cer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: SHA256 checksum erzeugen und anhängen (optional)
+        shell: pwsh
+        run: |
+          $v='${{ steps.ver.outputs.version }}'
+          $msix = Get-ChildItem -Path . -Filter "GreyGlass_${v}_*.msix" -File | Select-Object -First 1
+          if ($msix) {
+            $hash = (Get-FileHash $msix.FullName -Algorithm SHA256).Hash
+            $out = "$($msix.Name).sha256"
+            "$hash  $($msix.Name)" | Set-Content -Encoding ASCII -NoNewline -Path $out
+            echo "checksum_file=$out" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Checksum als Release-Asset anhängen
+        if: steps.ver.outcome == 'success'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          files: ${{ steps.publish.outputs.checksum_file }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
