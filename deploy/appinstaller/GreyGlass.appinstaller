@@ -1,12 +1,11 @@
-﻿<AppInstaller Uri="https://downloads.hrabnaz.dev/GreyGlass.appinstaller"
+<AppInstaller Uri="https://hrabnaz33.github.io/greysuite/GreyGlass.appinstaller"
               Version="1.0.0.0"
               xmlns="http://schemas.microsoft.com/appx/appinstaller/2018">
+
   <MainPackage Name="GreyGlass"
                Publisher="CN=Hrabnaz v Merseburg"
                Version="1.0.0.0"
                ProcessorArchitecture="x64"
-               Uri="https://downloads.hrabnaz.dev/GreyGlass_1.0.0.0_x64.msix" />
-  <UpdateSettings>
-    <OnLaunch HoursBetweenUpdateChecks="6" ShowPrompt="false" UpdateBlocksActivation="true"/>
-  </UpdateSettings>
+               Uri="https://hrabnaz33.github.io/greysuite/GreyGlass_1.0.0.0_x64.msix" />
+  ...
 </AppInstaller>
