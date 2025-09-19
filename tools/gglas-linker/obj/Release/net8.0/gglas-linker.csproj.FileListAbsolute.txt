@@ -1,0 +1,15 @@
+C:\Repos\greysuite\tools\gglas-linker\bin\Release\net8.0\gglas-linker.exe
+C:\Repos\greysuite\tools\gglas-linker\bin\Release\net8.0\gglas-linker.deps.json
+C:\Repos\greysuite\tools\gglas-linker\bin\Release\net8.0\gglas-linker.runtimeconfig.json
+C:\Repos\greysuite\tools\gglas-linker\bin\Release\net8.0\gglas-linker.dll
+C:\Repos\greysuite\tools\gglas-linker\bin\Release\net8.0\gglas-linker.pdb
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\gglas-linker.GeneratedMSBuildEditorConfig.editorconfig
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\gglas-linker.AssemblyInfoInputs.cache
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\gglas-linker.AssemblyInfo.cs
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\gglas-linker.csproj.CoreCompileInputs.cache
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\gglas-linker.sourcelink.json
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\gglas-linker.dll
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\refint\gglas-linker.dll
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\gglas-linker.pdb
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\gglas-linker.genruntimeconfig.cache
+C:\Repos\greysuite\tools\gglas-linker\obj\Release\net8.0\ref\gglas-linker.dll
